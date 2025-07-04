@@ -1,17 +1,33 @@
+<!-- File 2: popup.html -->
+<!-- This is the small window that appears when you click the extension's icon. -->
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Gemini Downloader</title>
-  <style>
-    body {
-      font-family: sans-serif;
-      width: 200px;
-    }
-  </style>
+    <style>
+        body {
+            font-family: sans-serif;
+            width: 250px;
+            text-align: center;
+            padding: 10px;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4285F4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #357ae8;
+        }
+    </style>
 </head>
 <body>
-  <h1>Download Chat</h1>
-  <button id="downloadBtn">Download</button>
-  <script src="popup.js"></script>
+    <h3>Gemini Exporter</h3>
+    <button id="downloadBtn">Download All Chats</button>
+    <script src="popup.js"></script>
 </body>
 </html>

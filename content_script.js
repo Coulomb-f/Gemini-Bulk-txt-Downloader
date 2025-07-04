@@ -1,6 +1,5 @@
 // File 4: content_script.js
-// This is our powerful script from before, ready to be injected into the page!
-// It's the exact same logic, just in its own file.
+// This version has the correct selectors and saves to the root Downloads folder.
 
 (async () => {
     // Check if the script is already running to prevent double-clicks
@@ -55,7 +54,7 @@
 
         const safeFilename = chatTitle.replace(/[^a-z0-9_ \-]/gi, '_').substring(0, 100) + '.txt';
 
-        // Use the chrome.downloads API
+        // Use the chrome.runtime API to send a message to the background script
         chrome.runtime.sendMessage({
             action: "download",
             data: {
@@ -67,9 +66,9 @@
     };
 
     console.log("🚀 STARTING BULK CHAT DOWNLOADER 🚀");
-    const sidePanelScroller = document.querySelector('div[data-test-id="overflow-container"]');
+    const sidePanelScroller = document.querySelector('.conversation-items-container');
     if (!sidePanelScroller) {
-        console.error("Fatal Error: Could not find the side panel scroll container.");
+        console.error("Fatal Error: Could not find the side panel scroll container. The Gemini page structure may have changed.");
         window.isGeminiExporterRunning = false;
         return;
     }

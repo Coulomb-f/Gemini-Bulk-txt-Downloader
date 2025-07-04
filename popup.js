@@ -1,5 +1,4 @@
 // File 3: popup.js
-// This script makes the button in popup.html work.
 // This version uses the correct method to run our content script.
 
 document.getElementById('downloadBtn').addEventListener('click', () => {
