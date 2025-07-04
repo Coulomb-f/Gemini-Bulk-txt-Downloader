@@ -1,5 +1,5 @@
 // File 4: content_script.js
-// This version has the correct selectors and saves to the root Downloads folder.
+// This version uses a "fire-and-forget" message to prevent the "port closed" error.
 
 (async () => {
     // Check if the script is already running to prevent double-clicks
@@ -52,9 +52,8 @@
             return `🧑 You:\n${userText}\n\n🤖 Model:\n${modelText}`;
         }).join('\n\n========================================\n\n');
 
-        const safeFilename = chatTitle.replace(/[^a-z0-9_ \-]/gi, '_').substring(0, 100) + '.txt';
+        const safeFilename = "Gemini_Chats/" + chatTitle.replace(/[^a-z0-9_ \-]/gi, '_').substring(0, 100) + '.txt';
 
-        // Use the chrome.runtime API to send a message to the background script
         chrome.runtime.sendMessage({
             action: "download",
             data: {
