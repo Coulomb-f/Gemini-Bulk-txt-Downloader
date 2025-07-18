@@ -1,102 +1,143 @@
 // File 4: content_script.js
-// This version uses a "fire-and-forget" message to prevent the "port closed" error.
+// This version removes the automatic side-panel scrolling from the bulk downloader,
+// allowing the user to manually scroll and then download the visible chats.
 
-(async () => {
-    // Check if the script is already running to prevent double-clicks
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "startBulkDownload") {
+        console.log("Received command: startBulkDownload");
+        runBulkDownload();
+        sendResponse({ status: "started" });
+    } else if (request.action === "startSingleDownload") {
+        console.log("Received command: startSingleDownload");
+        runSingleDownload();
+        sendResponse({ status: "started" });
+    }
+    return true; // Keep the message channel open
+});
+
+// --- CORE HELPER FUNCTIONS (SHARED) ---
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function downloadSingleChat(chatTitle) {
+    console.log(`Processing: "${chatTitle}"`);
+    const chatContainer = document.querySelector('[data-test-id="chat-history-container"]');
+    if (chatContainer) {
+        let lastHeight = -1;
+        while (chatContainer.scrollTop > 0 || lastHeight !== chatContainer.scrollHeight) {
+            lastHeight = chatContainer.scrollHeight;
+            chatContainer.scrollTop = 0;
+            await sleep(1000);
+            if (chatContainer.scrollHeight === lastHeight) break;
+        }
+    }
+    const expandButtons = document.querySelectorAll('button[mattooltip="Expand text"]');
+    expandButtons.forEach(button => button.click());
+    await sleep(500);
+
+    const conversationTurns = document.querySelectorAll('.conversation-container');
+    const plainText = Array.from(conversationTurns).map(turn => {
+        const userQueryEl = turn.querySelector('user-query .query-text');
+        const modelResponseEl = turn.querySelector('model-response .markdown');
+        const userText = userQueryEl ? userQueryEl.innerText.trim() : '[User query not found]';
+        const modelText = modelResponseEl ? modelResponseEl.innerText.trim() : '[Model response not found]';
+        return `🧑 You:\n${userText}\n\n🤖 Model:\n${modelText}`;
+    }).join('\n\n========================================\n\n');
+
+    const safeFilename = 'Gemini_Chats/' + chatTitle.replace(/[^a-z0-9_ \-]/gi, '_').substring(0, 100) + '.txt';
+
+    chrome.runtime.sendMessage({ action: "downloadTXT", data: { filename: safeFilename, content: plainText } });
+    console.log(`  ✅ Sent request to download: "${safeFilename}"`);
+
+    chrome.runtime.sendMessage({ action: "chatDownloaded", data: { title: chatTitle } });
+}
+
+
+// --- SINGLE DOWNLOAD WORKFLOW ---
+async function runSingleDownload() {
     if (window.isGeminiExporterRunning) {
-        console.log("Exporter is already running. Please wait.");
+        console.log("Exporter is already running.");
         return;
     }
     window.isGeminiExporterRunning = true;
 
-    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    console.log("🚀 STARTING SINGLE CHAT DOWNLOAD 🚀");
 
-    const waitForChatToLoad = async (oldId) => {
-        const timeout = 20000;
-        const interval = 500;
-        let elapsedTime = 0;
-        while (elapsedTime < timeout) {
-            const newFirstMessage = document.querySelector('.conversation-container');
-            const newId = newFirstMessage ? newFirstMessage.id : null;
-            if (newId && newId !== oldId) {
-                await sleep(1500);
-                return true;
-            }
-            await sleep(interval);
-            elapsedTime += interval;
-        }
-        return false;
-    };
+    let activeChatLink =
+        document.querySelector('div[data-test-id="conversation"][aria-current="true"]') ||
+        document.querySelector('a.active[data-test-id="conversation-link"]') ||
+        document.querySelector('div[data-test-id="conversation"].selected');
 
-    const downloadSingleChat = async (chatTitle) => {
-        const chatContainer = document.querySelector('[data-test-id="chat-history-container"]');
-        if (chatContainer) {
-            let lastHeight = -1;
-            while (chatContainer.scrollTop > 0 || lastHeight !== chatContainer.scrollHeight) {
-                lastHeight = chatContainer.scrollHeight;
-                chatContainer.scrollTop = 0;
-                await sleep(2000);
-                if (chatContainer.scrollHeight === lastHeight) break;
-            }
-        }
-        const expandButtons = document.querySelectorAll('button[mattooltip="Expand text"]');
-        expandButtons.forEach(button => button.click());
-        await sleep(500);
+    const chatTitle = activeChatLink ? activeChatLink.innerText.trim() : `Current-Chat-${Date.now()}`;
 
-        const conversationTurns = document.querySelectorAll('.conversation-container');
-        const chatText = Array.from(conversationTurns).map(turn => {
-            const userQueryEl = turn.querySelector('user-query .query-text');
-            const modelResponseEl = turn.querySelector('model-response .markdown');
-            const userText = userQueryEl ? userQueryEl.innerText.trim() : '[User query not found]';
-            const modelText = modelResponseEl ? modelResponseEl.innerText.trim() : '[Model response not found]';
-            return `🧑 You:\n${userText}\n\n🤖 Model:\n${modelText}`;
-        }).join('\n\n========================================\n\n');
+    if (!activeChatLink) {
+        console.warn("Could not find the active chat title in the side panel. Using a generic filename.");
+    }
 
-        const safeFilename = "Gemini_Chats/" + chatTitle.replace(/[^a-z0-9_ \-]/gi, '_').substring(0, 100) + '.txt';
+    await downloadSingleChat(chatTitle);
 
-        chrome.runtime.sendMessage({
-            action: "download",
-            data: {
-                filename: safeFilename,
-                content: chatText
-            }
-        });
-        console.log(`  ✅ Sent request to download: "${safeFilename}"`);
-    };
+    console.log("\n🎉 SINGLE DOWNLOAD COMPLETE! 🎉");
+    window.isGeminiExporterRunning = false;
+}
 
-    console.log("🚀 STARTING BULK CHAT DOWNLOADER 🚀");
-    const sidePanelScroller = document.querySelector('.conversation-items-container');
-    if (!sidePanelScroller) {
-        console.error("Fatal Error: Could not find the side panel scroll container. The Gemini page structure may have changed.");
-        window.isGeminiExporterRunning = false;
+
+// --- BULK DOWNLOAD WORKFLOW (MANUAL SCROLL) ---
+async function runBulkDownload() {
+    if (window.isGeminiExporterRunning) {
+        console.log("Exporter is already running.");
         return;
     }
-    let lastHeight = -1;
-    while (lastHeight !== sidePanelScroller.scrollHeight) {
-        lastHeight = sidePanelScroller.scrollHeight;
-        sidePanelScroller.scrollTop = sidePanelScroller.scrollHeight;
-        await sleep(2000);
-    }
+    window.isGeminiExporterRunning = true;
+
+    const getHistory = () => new Promise(resolve => {
+        chrome.storage.local.get(['downloadedChats'], (result) => {
+            resolve(result.downloadedChats || []);
+        });
+    });
+
+    const downloadedChats = await getHistory();
+    console.log("🚀 STARTING BULK CHAT DOWNLOADER (MANUAL SCROLL MODE) 🚀");
+    console.log("Previously downloaded chats:", downloadedChats);
+    
+    // --- AUTOMATIC SCROLLING LOGIC REMOVED ---
+    // The script will now only see the chats that are currently visible in the DOM.
+    console.log("Scanning for visible chats in the side panel...");
 
     const chatLinks = Array.from(document.querySelectorAll('div[data-test-id="conversation"]')).reverse();
-    const totalChats = chatLinks.length;
-    console.log(`2️⃣ Found ${totalChats} chats to download.`);
+    console.log(`Found ${chatLinks.length} visible chats to process.`);
 
-    for (let i = 0; i < totalChats; i++) {
-        const chatLink = chatLinks[i];
-        const chatTitle = chatLink.innerText.trim() || `Untitled-Chat-${i + 1}`;
-        console.log(`\nProcessing chat ${i + 1} of ${totalChats}: "${chatTitle}"`);
+    for (const chatLink of chatLinks) {
+        const chatTitle = chatLink.innerText.trim() || "Untitled-Chat";
+
+        if (downloadedChats.includes(chatTitle)) {
+            console.log(`Skipping already downloaded chat: "${chatTitle}"`);
+            continue;
+        }
+
+        console.log(`\nProcessing new chat: "${chatTitle}"`);
         const currentFirstMessage = document.querySelector('.conversation-container');
         const previousChatId = currentFirstMessage ? currentFirstMessage.id : null;
+
         chatLink.click();
-        const chatLoaded = await waitForChatToLoad(previousChatId);
+
+        let chatLoaded = false;
+        for (let i = 0; i < 40; i++) { // Timeout after 20 seconds
+            const newFirstMessage = document.querySelector('.conversation-container');
+            if (newFirstMessage && newFirstMessage.id !== previousChatId) {
+                chatLoaded = true;
+                break;
+            }
+            await sleep(500);
+        }
+
         if (chatLoaded) {
+            await sleep(1500);
             await downloadSingleChat(chatTitle);
         } else {
             console.error(`  ❌ Timed out waiting for "${chatTitle}" to load. Skipping.`);
         }
         await sleep(2000);
     }
-    console.log("\n🎉🎉🎉 BULK DOWNLOAD COMPLETE! 🎉🎉🎉");
+
+    console.log("\n🎉🎉🎉 BULK DOWNLOAD COMPLETE! �🎉🎉");
     window.isGeminiExporterRunning = false;
-})();
+}

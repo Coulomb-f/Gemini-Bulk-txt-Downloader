@@ -1,41 +1,60 @@
 // File 5: background.js
-// This version uses a more robust download function and simplified listener
-// to prevent API availability errors.
+// This version correctly listens for all actions from the content script and popup.
 
 console.log("Background service worker started.");
 
-// Use a separate, named function for the listener for clarity.
-async function handleDownloadRequest(request, sender) {
-  // Check if the message is our specific "download" action.
-  if (request.action === "download") {
-    console.log("Background: Received download request for:", request.data.filename);
+// Main listener for all messages
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    switch (request.action) {
+        case "downloadTXT":
+            handleDownloadRequest(request.data);
+            sendResponse({ status: "success" });
+            break;
+        // Note: We are not using the PDF feature for now, but the logic would go here.
+        case "chatDownloaded":
+            addChatToHistory(request.data.title);
+            sendResponse({ status: "success" });
+            break;
+        case "clearHistory":
+            clearDownloadHistory();
+            sendResponse({ status: "success" });
+            break;
+    }
+    // Return true to keep the message channel open for asynchronous responses if needed.
+    return true;
+});
 
-    const { filename, content } = request.data;
-
-    // Manually construct a `data:` URL. This is the most reliable method.
+function handleDownloadRequest(data) {
+    const { filename, content } = data;
     const dataUrl = "data:text/plain;charset=utf-8," + encodeURIComponent(content);
 
-    console.log(`Background: Created data URL. Attempting download...`);
-
-    try {
-      // The chrome.downloads.download function is an alias for .create() and can be more stable.
-      const downloadId = await chrome.downloads.download({
+    chrome.downloads.download({
         url: dataUrl,
         filename: filename,
         saveAs: false
-      });
-
-      if (downloadId) {
-        console.log(`Background: Download successfully started for "${filename}" with ID: ${downloadId}`);
-      } else {
-        console.warn(`Background: Download for "${filename}" was initiated but did not return an ID. Check browser download settings.`);
-      }
-    } catch (error) {
-      // This will catch the "chrome.downloads.download is not a function" error if it happens again.
-      console.error(`Background: CRITICAL ERROR during download for "${filename}". Error:`, error);
-    }
-  }
+    }, (downloadId) => {
+        if (chrome.runtime.lastError) {
+            console.error(`Download failed for "${filename}":`, chrome.runtime.lastError.message);
+        } else {
+            console.log(`Download started for "${filename}" with ID: ${downloadId}`);
+        }
+    });
 }
 
-// Add the listener.
-chrome.runtime.onMessage.addListener(handleDownloadRequest);
+function addChatToHistory(title) {
+    chrome.storage.local.get(['downloadedChats'], (result) => {
+        const history = result.downloadedChats || [];
+        if (!history.includes(title)) {
+            history.push(title);
+            chrome.storage.local.set({ downloadedChats: history }, () => {
+                console.log(`'${title}' added to download history.`);
+            });
+        }
+    });
+}
+
+function clearDownloadHistory() {
+    chrome.storage.local.set({ downloadedChats: [] }, () => {
+        console.log("Download history cleared.");
+    });
+}

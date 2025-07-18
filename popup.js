@@ -1,30 +1,59 @@
 // File 3: popup.js
-// This version uses the correct method to run our content script.
+// Now handles both download buttons, sending a different action for each.
 
-document.getElementById('downloadBtn').addEventListener('click', () => {
-  console.log("Button clicked. Attempting to execute script...");
+document.addEventListener('DOMContentLoaded', () => {
+    const downloadCurrentBtn = document.getElementById('downloadCurrentBtn');
+    const downloadAllBtn = document.getElementById('downloadAllBtn');
+    const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+    const statusDiv = document.getElementById('status');
 
-  // Find the active Gemini tab
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    // Check if we found a tab and if it's a gemini.google.com page
-    if (tabs[0] && tabs[0].url.startsWith("https://gemini.google.com/")) {
-      console.log(`Executing script on tab ID: ${tabs[0].id}`);
-      // This is the correct way to inject and run a script that performs an action.
-      chrome.scripting.executeScript({
-        target: { tabId: tabs[0].id },
-        files: ['content_script.js']
-      }, () => {
-        if (chrome.runtime.lastError) {
-          console.error("Script execution failed:", chrome.runtime.lastError.message);
-          alert("An error occurred. Check the console for details.");
-        } else {
-          console.log("Script injected successfully. Closing popup.");
-          window.close(); // Close the popup, the script is running on the page now.
-        }
-      });
-    } else {
-      console.error("Not on a valid Gemini page.");
-      alert("This extension only works on gemini.google.com pages.");
+    // Update status with the number of previously downloaded chats
+    chrome.storage.local.get(['downloadedChats'], (result) => {
+        const count = result.downloadedChats ? result.downloadedChats.length : 0;
+        statusDiv.textContent = `${count} chats in download history.`;
+    });
+
+    // --- Event Listener for SINGLE Download ---
+    downloadCurrentBtn.addEventListener('click', () => {
+        statusDiv.textContent = "Downloading current chat...";
+        sendMessageToContentScript({ action: "startSingleDownload" });
+    });
+
+    // --- Event Listener for BULK Download ---
+    downloadAllBtn.addEventListener('click', () => {
+        statusDiv.textContent = "Starting bulk download...";
+        sendMessageToContentScript({ action: "startBulkDownload" });
+    });
+
+    // --- Event Listener for CLEAR HISTORY ---
+    clearHistoryBtn.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ action: "clearHistory" }, (response) => {
+            if (response && response.status === "success") {
+                statusDiv.textContent = "History cleared!";
+            }
+        });
+    });
+
+    // Helper function to send messages and close the popup
+    function sendMessageToContentScript(message) {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs[0] && tabs[0].url.startsWith("https://gemini.google.com/")) {
+                chrome.scripting.executeScript({
+                    target: { tabId: tabs[0].id },
+                    files: ['content_script.js']
+                }, () => {
+                    chrome.tabs.sendMessage(tabs[0].id, message, (response) => {
+                        if (chrome.runtime.lastError) {
+                            statusDiv.textContent = "Error: Reload Gemini page.";
+                            console.error(chrome.runtime.lastError.message);
+                        } else {
+                            window.close();
+                        }
+                    });
+                });
+            } else {
+                statusDiv.textContent = "Error: Not a Gemini page.";
+            }
+        });
     }
-  });
 });
